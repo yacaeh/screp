@@ -42,7 +42,14 @@ var (
 	indent = flag.Bool("indent", true, "use indentation when formatting output")
 )
 
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+}
+
 func uploadFile(w http.ResponseWriter, r *http.Request) {
+	enableCors(&w)
 	fmt.Println("method:", r.Method)
 	userid := r.FormValue("userid") // x will be "" if parameter is not set
 	fmt.Println("userid:", userid)
@@ -84,17 +91,23 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func setupRoutes() {
-	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
-		res.Header().Set("Content-type", "text/html")
-		fmt.Fprint(res, "<h1>Replay Server</h1>")
+	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		enableCors(&w)
+		w.Header().Set("Content-type", "text/html")
+		fmt.Fprint(w, "<h1>Replay Server</h1>")
 	})
 
 	http.HandleFunc("/upload", uploadFile)
-	fs := http.FileServer(http.Dir("./replays"))
+	fs := http.StripPrefix("/replays", http.FileServer(http.Dir("./replays")))
 
-	http.Handle("/replays/", http.StripPrefix("/replays", fs))
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		fs.ServeHTTP(w, r)
+	})
 
-	err := http.ListenAndServeTLS(":443", "cert.crt", "private.key", nil)
+	http.Handle("/replays/", wrapped)
+
+	err := http.ListenAndServeTLS(":443", "localhost.cert", "localhost.key", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
