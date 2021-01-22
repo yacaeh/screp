@@ -87,7 +87,7 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf(tempFile.Name())
 		parseRep(tempFile.Name())
 		// 4. return result
-		fmt.Fprintf(w, tempFile.Name())
+		fmt.Fprintf(w, tempFile.Name()[:len(tempFile.Name())-4]+".json")
 	}
 }
 func setupRoutes() {
