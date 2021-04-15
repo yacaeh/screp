@@ -47,7 +47,6 @@ import (
 	"runtime"
 	"sort"
 	"time"
-	"unicode/utf8"
 
 	"github.com/icza/screp/rep"
 	"github.com/icza/screp/rep/repcmd"
@@ -65,7 +64,7 @@ import (
 
 const (
 	// Version is a Semver2 compatible version of the parser.
-	Version = "v1.6.0"
+	Version = "v1.4.3"
 )
 
 var (
@@ -304,15 +303,15 @@ func parseHeader(data []byte, r *rep.Replay, cfg Config) error {
 	h.Engine = repcore.EngineByID(data[0x00])
 	h.Frames = repcore.Frame(bo.Uint32(data[0x01:]))
 	h.StartTime = time.Unix(int64(bo.Uint32(data[0x08:])), 0) // replay stores seconds since EPOCH
-	h.Title, h.RawTitle = cString(data[0x18 : 0x18+28])
+	h.Title = cString(data[0x18 : 0x18+28])
 	h.MapWidth = bo.Uint16(data[0x34:])
 	h.MapHeight = bo.Uint16(data[0x36:])
 	h.AvailSlotsCount = data[0x39]
 	h.Speed = repcore.SpeedByID(data[0x3a])
 	h.Type = repcore.GameTypeByID(bo.Uint16(data[0x3c:]))
 	h.SubType = bo.Uint16(data[0x3e:])
-	h.Host, h.RawHost = cString(data[0x48 : 0x48+24])
-	h.Map, h.RawMap = cString(data[0x61 : 0x61+26])
+	h.Host = cString(data[0x48 : 0x48+24])
+	h.Map = cString(data[0x61 : 0x61+26])
 
 	// Parse players
 	const (
@@ -331,7 +330,7 @@ func parseHeader(data []byte, r *rep.Replay, cfg Config) error {
 		p.Type = repcore.PlayerTypeByID(ps[8])
 		p.Race = repcore.RaceByID(ps[9])
 		p.Team = ps[10]
-		p.Name, p.RawName = cString(ps[11 : 11+25])
+		p.Name = cString(ps[11 : 11+25])
 
 		if i < maxPlayers {
 			p.Color = repcore.ColorByID(bo.Uint32(data[0x251+i*4:]))
@@ -474,7 +473,7 @@ func parseCommands(data []byte, r *rep.Replay, cfg Config) error {
 			case repcmd.TypeIDChat:
 				chatCmd := &repcmd.ChatCmd{Base: base}
 				chatCmd.SenderSlotID = sr.getByte()
-				chatCmd.Message, _ = cString(sr.readSlice(80))
+				chatCmd.Message = cString(sr.readSlice(80))
 				cmd = chatCmd
 
 			case repcmd.TypeIDVision:
@@ -704,13 +703,6 @@ func parseMapData(data []byte, r *rep.Replay, cfg Config) error {
 		md.Debug = &rep.MapDataDebug{Data: data}
 	}
 
-	var (
-		scenarioNameIdx        uint16 // String index
-		scenarioDescriptionIdx uint16 // String index
-		stringsData            []byte
-		extendedStringsData    bool
-	)
-
 	// Map data section is a sequence of sub-sections:
 	for sr, size := (sliceReader{b: data}), uint32(len(data)); sr.pos < size; {
 		id := sr.getString(4)
@@ -778,83 +770,17 @@ func parseMapData(data []byte, r *rep.Replay, cfg Config) error {
 				// Skip unprocessed unit data:
 				sr.pos = unitEndPos
 			}
-		case "SPRP": // Scenario properties
-			// Strings section might be after this, so we just record the string indices for now:
-			scenarioNameIdx = sr.getUint16()
-			scenarioDescriptionIdx = sr.getUint16()
-		case "STR ": // String data
-			// There might be multiple "STR " sections, use the one that does contain strings.
-			stringsStart := int(sr.pos)
-			count := sr.getUint16() // Number of following offsets (uint16 values)
-			// Check if section is "big" enough to hold strings too
-			if stringsStart+2+int(count)*2+1 < int(ssEndPos) {
-				// Here come count offsets (all uint16). Each offset tells the start of a 0-terminated string.
-				// The offset value is from stringsStart.
-				// Offset 0 is 0, and it's not included here. It denotes the default / missing string. First value is offset1.
-				// Do not parse offsets and strings here, we only use 2 which we'll do in the end. Just "save" the slice for later use.
-				stringsData = data[stringsStart:ssEndPos]
-			}
-		case "STRx": // Extended String data
-			// This section is identical to "STR " except that all uint16 values are uint32 values.
-			stringsStart := int(sr.pos)
-			count := sr.getUint32() // Number of following offsets (uint32 values)
-			// Check if section is "big" enough to hold strings too
-			if stringsStart+4+int(count)*4+1 < int(ssEndPos) {
-				// Here come count offsets (all uint32). Each offset tells the start of a 0-terminated string.
-				// The offset value is from stringsStart.
-				// Offset 0 is 0, and it's not included here. It denotes the default / missing string. First value is offset1.
-				// Do not parse offsets and strings here, we only use 2 which we'll do in the end. Just "save" the slice for later use.
-				stringsData = data[stringsStart:ssEndPos]
-				extendedStringsData = true
-			}
 		}
 
 		// Part or all of the sub-section might be unprocessed, skip the unprocessed bytes
 		sr.pos = ssEndPos
 	}
 
-	// Get a string from the strings identified by its index.
-	getString := func(idx uint16) string {
-		if idx == 0 {
-			return ""
-		}
-		var offsetSize uint32
-		if extendedStringsData {
-			offsetSize = 4
-		} else {
-			offsetSize = 2
-		}
-		pos := uint32(idx) * offsetSize // idx is 1-based (0th offset is not included), but stringsData contains the offsets count too
-		if int(pos+offsetSize-1) >= len(stringsData) {
-			log.Printf("Invalid strings index: %d, map: %s", idx, r.Header.Map)
-			return ""
-		}
-		var offset uint32
-		if extendedStringsData {
-			offset = (&sliceReader{b: stringsData, pos: pos}).getUint32()
-		} else {
-			offset = uint32((&sliceReader{b: stringsData, pos: pos}).getUint16())
-		}
-		if int(offset) >= len(stringsData) {
-			log.Printf("Invalid strings offset: %d, strings index: %d, map: %s", offset, idx, r.Header.Map)
-			return ""
-		}
-		s, _ := cString(stringsData[offset:])
-		return s
-	}
-
-	md.Name = getString(scenarioNameIdx)
-	md.Description = getString(scenarioDescriptionIdx)
-
 	return nil
 }
 
-var koreanDecoder = korean.EUCKR.NewDecoder()
-
 // cString returns a 0x00 byte terminated string from the given buffer.
-// If the string is not valid UTF-8, tries to decode it as EUC-KR (also known as Code Page 949).
-// Returns both the decoded and the original string.
-func cString(data []byte) (s string, orig string) {
+func cString(data []byte) string {
 	// Find 0x00 byte:
 	checkUTF8, _ := DecodeRune(data)
 	if checkUTF8 == 65533 {
@@ -862,23 +788,11 @@ func cString(data []byte) (s string, orig string) {
 	}
 	for i, ch := range data {
 		if ch == 0 {
-			data = data[:i] // excludes terminating 0x00
-
-			if !utf8.Valid(data) {
-				// Try korean
-				if krdata, err := koreanDecoder.Bytes(data); err == nil {
-					return string(krdata), string(data)
-				}
-			}
-			break // Either UTF-8 or custom decoding failed
+			return string(data[:i]) // excludes terminating 0x00
 		}
 	}
-
-	// Return data as string.
-	// We end up here if no terminating 0 char found, or string is valid UTF-8, or it is invalid but custom decoding failed.
-	// Either way:
-	s = string(data)
-	return s, s
+	// Couldn't find? As a fallback, just return the whole as-is:
+	return string(data)
 }
 
 // return Korean String from given buffer
