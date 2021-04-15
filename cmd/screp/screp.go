@@ -107,7 +107,7 @@ func setupRoutes() {
 
 	http.Handle("/replays/", wrapped)
 
-	err := http.ListenAndServe(":3000", nil)
+	err := http.ListenAndServe(":"+os.Getenv("PORT"), nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
