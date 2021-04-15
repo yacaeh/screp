@@ -1,1 +1,1 @@
-web: ./screp
+web: screp
