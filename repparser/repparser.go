@@ -873,17 +873,12 @@ func cString(data []byte) (s string, orig string) {
 			break // Either UTF-8 or custom decoding failed
 		}
 	}
-<<<<<<< HEAD
-	// Couldn't find? As a fallback, just return the whole as-is:
-	return string(data)
-=======
 
 	// Return data as string.
 	// We end up here if no terminating 0 char found, or string is valid UTF-8, or it is invalid but custom decoding failed.
 	// Either way:
 	s = string(data)
 	return s, s
->>>>>>> f222ba0f213dbec2e31148e06dded7584630bbfb
 }
 
 // return Korean String from given buffer
