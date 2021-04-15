@@ -1,5 +1,5 @@
 module github.com/icza/screp
-
+// +heroku goVersion go1.13
 go 1.13
 
 require (
