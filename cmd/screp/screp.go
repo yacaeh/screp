@@ -107,7 +107,7 @@ func setupRoutes() {
 
 	http.Handle("/replays/", wrapped)
 
-	err := http.ListenAndServe(":443", nil)
+	err := http.ListenAndServeTLS(":443", "localhost.cert", "localhost.key", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
