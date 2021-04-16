@@ -114,9 +114,9 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		jsonFile, err := os.Open(tempFile.Name())
 
 		_, err = jsonUploader.Upload(&s3manager.UploadInput{
-			Bucket: aws.String(AWS_S3_BUCKET),                           // Bucket
-			Key:    aws.String(path + "/" + handler.Filename + ".json"), // Name of the file to be saved
-			Body:   jsonFile,                                            // File
+			Bucket: aws.String(AWS_S3_BUCKET),                                                     // Bucket
+			Key:    aws.String(path + "/" + handler.Filename[:len(handler.Filename)-4] + ".json"), // Name of the file to be saved
+			Body:   jsonFile,                                                                      // File
 		})
 		if err != nil {
 			// Do your error handling here
@@ -125,7 +125,7 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 4. return result
-		fmt.Fprintf(w, path+"/"+handler.Filename+".json")
+		fmt.Fprintf(w, path+"/"+handler.Filename[:len(handler.Filename)-4]+".json")
 
 		return
 	}
