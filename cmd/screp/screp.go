@@ -111,7 +111,7 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		parseRep(tempFile.Name())
 
 		jsonUploader := s3manager.NewUploader(sess)
-		jsonFile, err := os.Open(tempFile.Name())
+		jsonFile, err := os.Open(tempFile.Name()[:len(tempFile.Name())-4] + ".json")
 
 		_, err = jsonUploader.Upload(&s3manager.UploadInput{
 			Bucket: aws.String(AWS_S3_BUCKET),                                                     // Bucket
