@@ -16,15 +16,20 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/icza/screp/rep"
 	"github.com/icza/screp/repparser"
 )
 
 const (
-	appName    = "screp"
-	appVersion = "v1.5.0"
-	appAuthor  = "Andras Belicza"
-	appHome    = "https://github.com/icza/screp"
+	appName       = "screp"
+	appVersion    = "v1.5.0"
+	appAuthor     = "Andras Belicza"
+	appHome       = "https://github.com/icza/screp"
+	AWS_S3_REGION = "ap-northeast-2"
+	AWS_S3_BUCKET = "screp"
 )
 
 // Flag variables
@@ -51,7 +56,8 @@ func enableCors(w *http.ResponseWriter) {
 func uploadFile(w http.ResponseWriter, r *http.Request) {
 	enableCors(&w)
 	fmt.Println("method:", r.Method)
-	userid := r.FormValue("userid") // x will be "" if parameter is not set
+	userid := r.FormValue("userid")     // x will be "" if parameter is not set
+	replayid := r.FormValue("replayid") // x will be "" if parameter is not set
 	fmt.Println("userid:", userid)
 	if r.Method == "POST" {
 		// 1. parse input
@@ -68,13 +74,30 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("File Size: %+v\n", handler.Size)
 		fmt.Printf("MIME Header: %+v\n", handler.Header)
 
-		path := "replays/" + userid
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.Mkdir(path, 0700)
+		path := "replays/" + userid + "/" + replayid
+
+		// Upload the file to S3.
+		uploader := s3manager.NewUploader(sess)
+
+		_, err = uploader.Upload(&s3manager.UploadInput{
+			Bucket: aws.String(AWS_S3_BUCKET),                 // Bucket
+			Key:    aws.String(path + "/" + handler.Filename), // Name of the file to be saved
+			Body:   file,                                      // File
+		})
+		if err != nil {
+			// Do your error handling here
+			showError(w, r, http.StatusInternalServerError, "Something went wrong uploading the file")
+			return
 		}
 
+		fmt.Fprintf(w, "Successfully uploaded to %q\n", AWS_S3_BUCKET)
+		// return
+		// if _, err := os.Stat(path); os.IsNotExist(err) {
+		// 	os.Mkdir(path, 0700)
+		// }
+
 		// 3. write temporary file on our server
-		tempFile, err := ioutil.TempFile(path, "upload-*.rep")
+		tempFile, err := ioutil.TempFile(os.TempDir(), "upload-*.rep")
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -88,6 +111,8 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 		parseRep(tempFile.Name())
 		// 4. return result
 		fmt.Fprintf(w, tempFile.Name()[:len(tempFile.Name())-4]+".json")
+
+		return
 	}
 }
 func setupRoutes() {
@@ -107,7 +132,9 @@ func setupRoutes() {
 
 	http.Handle("/replays/", wrapped)
 
-	err := http.ListenAndServe(":"+os.Getenv("PORT"), nil)
+	err := http.ListenAndServe(":3000", nil)
+	// err := http.ListenAndServe(":"+os.Getenv("PORT"), nil)
+	fmt.Printf(os.Getenv("PORT"))
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
@@ -159,4 +186,52 @@ func printUsage() {
 	name := os.Args[0]
 	fmt.Printf("\t%s [FLAGS] repfile.rep\n", name)
 	fmt.Println("\tRun with '-h' to see a list of available flags.")
+}
+
+// AWS Related functions
+var sess = connectAWS()
+
+func connectAWS() *session.Session {
+	sess, err := session.NewSession(&aws.Config{Region: aws.String(AWS_S3_REGION)})
+	if err != nil {
+		panic(err)
+	}
+	return sess
+}
+
+func showError(w http.ResponseWriter, r *http.Request, status int, message string) {
+	w.WriteHeader(http.StatusBadRequest)
+	fmt.Fprintf(w, message)
+}
+
+func handlerUpload(w http.ResponseWriter, r *http.Request) {
+
+	r.ParseMultipartForm(10 << 20)
+
+	// Get a file from the form input name "file"
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		showError(w, r, http.StatusInternalServerError, "Something went wrong retrieving the file from the form")
+		return
+	}
+	defer file.Close()
+
+	filename := header.Filename
+
+	// Upload the file to S3.
+	uploader := s3manager.NewUploader(sess)
+
+	_, err = uploader.Upload(&s3manager.UploadInput{
+		Bucket: aws.String(AWS_S3_BUCKET), // Bucket
+		Key:    aws.String(filename),      // Name of the file to be saved
+		Body:   file,                      // File
+	})
+	if err != nil {
+		// Do your error handling here
+		showError(w, r, http.StatusInternalServerError, "Something went wrong uploading the file")
+		return
+	}
+
+	fmt.Fprintf(w, "Successfully uploaded to %q\n", AWS_S3_BUCKET)
+	return
 }
